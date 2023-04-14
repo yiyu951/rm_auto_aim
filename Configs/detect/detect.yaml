@@ -1,0 +1,24 @@
+%YAML:1.0
+---
+Thresholds:
+  lowerb: [ 0, 151, 136, 0. ] # 0, 0, 169, 0
+  upperb: [ 200, 255, 255, 0. ]  # 200, 134, 255, 0
+  red:
+    lowerb: [ 0, 134, 114, 0. ]
+    upperb: [ 255, 255, 255, 0. ]
+  blue:
+    lowerb: [ 0, 69, 190, 0. ]
+    upperb: [ 113, 255, 255, 0. ]
+
+light:
+  max_angle: 40.0
+  max_ratio: 0.4
+  min_ratio: 0.1
+
+armour:
+  max_angle: 35.0
+  min_light_ratio: 0.6
+  max_large_center_distance: 5.0
+  min_large_center_distance: 3.2
+  max_small_center_distance: 3.2
+  min_small_center_distance: 0.8
