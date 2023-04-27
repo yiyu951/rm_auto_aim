@@ -36,7 +36,7 @@ int main(int argc, char ** argv)
     // 模块初始化
     utils::timer timer{"main", 10};
 
-    Modules::Detector detector{PROJECT_DIR "/Configs/detect/armor-nano-poly-fp32-last.engine"};
+    Modules::Detector detector{PROJECT_DIR "/Configs/detect/armor-nano-poly-fp32-130.engine"};
     Modules::PredictorEKF predictor{};
 
     //  Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
