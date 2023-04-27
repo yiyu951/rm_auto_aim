@@ -186,7 +186,7 @@ bool MV_Camera::read(cv::Mat & img) const
     tSdkFrameHead head;
     BYTE * buffer;
     // 100 为超时时间
-    MV_CHECK_API_ERROR(CameraGetImageBuffer(handle, &head, &buffer, 1000), "");
+    MV_CHECK_API_ERROR(CameraGetImageBuffer(handle, &head, &buffer, 3000), "");
     img = cv::Mat(head.iHeight, head.iWidth, CV_8UC3);
     MV_CHECK_API_ERROR(CameraImageProcess(handle, buffer, img.data, &head), "");
     MV_CHECK_API_ERROR(CameraReleaseImageBuffer(handle, buffer), "");

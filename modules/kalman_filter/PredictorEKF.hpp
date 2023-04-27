@@ -34,9 +34,9 @@ class PredictorEKF
 {
 public:
     explicit PredictorEKF();
-    bool solve(std::vector<Robot::Armour> &, cv::Mat &);
+    bool solve(std::vector<ArmorObject> &, cv::Mat &);
     bool predict(
-        Robot::Detection_pack &, const Devices::ReceiveData &, Devices::SendData &, cv::Mat &);
+        Modules::Detection_pack &, const Devices::ReceiveData &, Devices::SendData &, cv::Mat &, Robot::Color);
 
 
     PredictorEKF(PredictorEKF const &) = delete;
@@ -56,45 +56,16 @@ private:
     Predict predictfunc;  // f(x)
     Measure measure;      // h(x)
     double last_time = 0;
+
+
+    int loss_frame = 0;
     // 弹道模型
 
 
     std::vector<cv::Point3d> small_obj, big_obj;  //大小装甲板
 
     // pnp解算:获取相机坐标系内装甲板坐标
-    Eigen::Vector3d get_camera_points(std::vector<cv::Point2f> &, Robot::ArmourType);
-
-    // 相机坐标系内坐标--->世界坐标系内坐标
-    inline Eigen::Vector3d pc2pw(
-        const Eigen::Vector3d & camera_points, const Eigen::Matrix3d & R_G2W)
-    {
-        auto R_C2W = R_C2G * R_G2W;
-        return R_C2W * camera_points;
-    }
-
-    // 世界坐标系内坐标--->相机坐标系内坐标
-    inline Eigen::Vector3d pw2pc(
-        const Eigen::Vector3d & world_points, const Eigen::Matrix3d & R_G2W)
-    {
-        auto R_W2C = (R_C2G * R_G2W).transpose();
-        return R_W2C * world_points;
-    }
-
-    // 相机坐标系内坐标--->图像坐标系内像素坐标
-    inline Eigen::Vector3d pc2pu(const Eigen::Vector3d & camera_points)
-    {
-        return F * camera_points / camera_points(2, 0);
-    }
-
-    // 将世界坐标系内一点，投影到图像中，并绘制该点
-    inline void re_project_point(
-        cv::Mat & image, const Eigen::Vector3d & world_points, const Eigen::Matrix3d & R_IW,
-        const cv::Scalar & color)
-    {
-        Eigen::Vector3d pc = pw2pc(world_points, R_IW);
-        Eigen::Vector3d pu = pc2pu(pc);
-        cv::circle(image, {int(pu(0, 0)), int(pu(1, 0))}, 3, color, 2);
-    }
+    Eigen::Vector3d get_camera_points(const ArmorObject& armor);
 
 
 public:
@@ -104,7 +75,7 @@ public:
     {
         //
         float receive_pitch = (receive_data.pitch / 180.) * M_PI;  // 上+，X轴向Z轴转
-        float receive_yaw   = (receive_data.yaw / 180.) / M_PI;    // 左+，X轴向Y轴转
+        float receive_yaw   = (receive_data.yaw / 180.) * M_PI;    // 左+，X轴向Y轴转
 
         // 云台坐标系下- 云台坐标系的X轴
         Eigen::Vector3d X_Gimbal(1, 0, 0);

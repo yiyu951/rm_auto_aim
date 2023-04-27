@@ -51,14 +51,27 @@ class AdaptiveEKF
 {
 public:
 public:
-    explicit AdaptiveEKF(const VectorX & X0 = VectorX::Zero())  //Identity()初始化一个单位矩阵
+    explicit AdaptiveEKF(const VectorX & X0)  //Identity()初始化一个单位矩阵
     : Xe(X0), P(MatrixXX::Identity()), Q(MatrixXX::Identity()), R(MatrixZZ::Identity())
     {
+    }
+
+    AdaptiveEKF(const MatrixXX & Q = MatrixXX::Identity(), const MatrixZZ & R = MatrixZZ::Identity(), const MatrixXX & P = MatrixXX::Identity())
+    : Xe(VectorX::Zero()), Q(Q), R(R) ,P(P)
+    {
+
     }
 
     void init(const VectorX & X0 = VectorX::Zero())
     {
         Xe = X0;
+    }
+
+    void reset(const VectorZ & Z){
+        Xe.block(0, 0, 3, 1) = Z; 
+        Xp.block(0, 0, 3, 1) = Z;
+        Xe.block(3, 0, 3, 1) = VectorZ::Zero();
+        Xp.block(3, 0, 3, 1) = VectorZ::Zero();
     }
 
     template <class Func> VectorX predict(Func && func)

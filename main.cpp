@@ -4,7 +4,6 @@
 
 #include "modules/detect_armour/detect.hpp"
 #include "modules/kalman_filter/PredictorEKF.hpp"
-#include "modules/number_classifier/number_classifier.hpp"
 
 #include "utils/robot.hpp"
 #include "utils/timer/timer.hpp"
@@ -33,15 +32,14 @@ int main(int argc, char ** argv)
         }
     }
 
+    fmt::print("Init Modules\n");
     // 模块初始化
     utils::timer timer{"main", 10};
 
-    Modules::Detect detector{color};
+    Modules::Detector detector{PROJECT_DIR "/Configs/detect/armor-nano-poly-fp32-last.engine"};
     Modules::PredictorEKF predictor{};
-    Modules::NumberClassifier number_classifier{PROJECT_DIR"/Configs/detect/fc.onnx",
-                                                PROJECT_DIR"/Configs/detect/label.txt", 0.45};
 
-     Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
+    //  Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
 
     int frame = 1;  //主线程的帧数
 
@@ -49,11 +47,11 @@ int main(int argc, char ** argv)
     cv::Mat copyImg;
     double timestamp_ms;  //曝光时间, 单位us
 
-    //相机进程
+    // 相机进程
     std::thread cameraThread{
         camera_thread, std::ref(main_loop_condition), std::ref(img), std::ref(camera_mutex),
         std::ref(timestamp_ms)};
-     std::thread readSerialThread{readSerial_thread, std::ref(serial)};
+    //  std::thread readSerialThread{readSerial_thread, std::ref(serial)};
 
     cameraThread.detach();
     // readSerialThread.detach();
@@ -69,64 +67,57 @@ int main(int argc, char ** argv)
 
     for (; main_loop_condition; frame++) {
         //计时
-        // timer.start(1);
+        timer.start(1);
         {  //上锁
-            if(img.empty()){
+            if (img.empty()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
             std::lock_guard<std::mutex> l(camera_mutex);
             copyImg = img.clone();
         }
-        
+
         // timer.start(1);
         auto endTime = std::chrono::system_clock::now();
         auto wasteTime =
             std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count() /
-            1e6;//单位 s
+            1e6;  //单位 s
 
-        cv::Mat showimg   = img;
-        auto receive_data = serial.getData();
-        // Devices::ReceiveData receive_data{0, 0, 14};
+        cv::Mat showimg = copyImg;
+        // auto receive_data = serial.getData();
+        Devices::ReceiveData receive_data{0, 0, 14};
 
-
-        Robot::Detection_pack detection_pack{copyImg, wasteTime};
+        Modules::Detection_pack detection_pack{copyImg, wasteTime};
         // timer.end(1, "init detection_pack");
 
         // timer.start(0);
         detector.detect(detection_pack);
-        // timer.end(0, "detect");
-
-        if(!detection_pack.armours.empty())
-        {
-            number_classifier.extractNumbers(copyImg, detection_pack.armours);
-            number_classifier.doClassify(detection_pack.armours);
-        }
+        // // timer.end(0, "detect");
 
         Devices::SendData send_data{};
-        predictor.predict(detection_pack, receive_data, send_data, showimg);
+        predictor.predict(detection_pack, receive_data, send_data, showimg, color);
 
-         std::thread sendSerialThread{sendSerial_thread, std::ref(serial), std::ref(send_data)};
-         sendSerialThread.join();
-        // draw
+        //  std::thread sendSerialThread{sendSerial_thread, std::ref(serial), std::ref(send_data)};
+        //  sendSerialThread.join();
+        // // draw
 
-        Robot::drawArmours(detection_pack.armours, showimg, color);
+        Robot::drawArmours(detection_pack.armors, showimg, color);
         // Robot::drawFPS(showimg, 1000. / main_thread_time, "Main", cv::Point2f(5, 80));
-         Robot::drawSerial(showimg, receive_data, cv::Point2f(1000, 20));
-         Robot::drawSend(showimg, send_data, cv::Point2f(1000, 80));
-
+        Robot::drawSerial(showimg, receive_data, cv::Point2f(1000, 20));
+        Robot::drawSend(showimg, send_data, cv::Point2f(1000, 80));
 
         // timer.start(0);
         cv::imshow("after_draw", showimg);
         cv::waitKey(1);  //waitKey(1) == waitKey(20)
 
+        // using namespace std::chrono_literals;
+        // std::this_thread::sleep_for(10ms);
+
         // timer.end(0, "imshow");
     }
 
-
     // fmt::print(fg(fmt::color::red), "end! wait for 5s\n");
     // std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-
 
     return 0;
 }

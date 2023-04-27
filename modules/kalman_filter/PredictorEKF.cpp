@@ -2,8 +2,9 @@
 
 // 射击延时。单位 s
 double shoot_delay_time = 0.1;
+double pre_time = 1;//预测时延，单位s。
 
-Modules::PredictorEKF::PredictorEKF() : ekf()
+Modules::PredictorEKF::PredictorEKF()
 {
     cv::FileStorage fin{PROJECT_DIR "/Configs/camera/camera.yaml", cv::FileStorage::READ};
 
@@ -42,61 +43,93 @@ Modules::PredictorEKF::PredictorEKF() : ekf()
     */
     small_obj = std::vector<cv::Point3d>{
         {-small_half_x, -small_half_y, 0},  //left top
-        {small_half_x, -small_half_y, 0},   //right top
+        {-small_half_x, small_half_y, 0},  //left bottom
         {small_half_x, small_half_y, 0},    //right bottom
-        {-small_half_x, small_half_y, 0}};  //left bottom
+        {small_half_x, -small_half_y, 0}};   //right top
     big_obj = std::vector<cv::Point3d>{
         {-big_half_x, -big_half_y, 0},  //left top
-        {big_half_x, -big_half_y, 0},   //right top
+        {-big_half_x, big_half_y, 0},  //left bottom
         {big_half_x, big_half_y, 0},    //right bottom
-        {-big_half_x, big_half_y, 0}};  //left bottom
+        {big_half_x, -big_half_y, 0}};   //right top
 
     fin.release();
-    
+
+    cv::Mat Q_mat, R_mat, P_mat;
+
+    // fin["EKF"]["Q"] >> Q_mat;
+    fin["EKF"]["R"] >> R_mat;
+    // fin["EKF"]["P"] >> P_mat;
+
+    MatrixXX Q = MatrixXX::Identity();
+    // Q(0, 0) = 0.01;
+    // Q(1, 1) = 0.01;
+    // Q(2, 2) = 0.01;
+    for(int i = 0; i < 6; i++)
+    {
+        Q(i, i) = 100;
+    }
+
+    MatrixZZ R = MatrixZZ::Identity();
+
+    // MatrixXX P;
+
+    // cv::cv2eigen(Q_mat, Q);
+    // cv::cv2eigen(R_mat, R);
+    // cv::cv2eigen(P_mat, P);
+
+    ekf = AdaptiveEKF{Q, R};
 }
 
 bool Modules::PredictorEKF::predict(
-    Robot::Detection_pack & detection_pack, const Devices::ReceiveData & receive_data,
-    Devices::SendData & send_data, cv::Mat & showimg)
+    Modules::Detection_pack & detection_pack, const Devices::ReceiveData & receive_data,
+    Devices::SendData & send_data, cv::Mat & showimg, Robot::Color color)
 {
     double timestamp = detection_pack.timestamp;
     auto & img       = detection_pack.img;
-    auto & armours   = detection_pack.armours;
+    auto & armours   = detection_pack.armors;
 
     if (armours.empty()) {  //.size() == 0, 会报错
         send_data.send_pitch = 0;
         send_data.send_yaw = 0;
         send_data.goal = 0;
+
+        loss_frame++;
         return false;
     }
+
+
 
     // 选择策略
     // auto & armours = detection_pack.armours;
     //对装甲板进行排序, 优先大装甲板, 其次选最大的
     std::sort(
-        armours.begin(), armours.end(), [](const Robot::Armour & a1, const Robot::Armour & a2) {
-            if (a1.armour_type == Robot::ArmourType::Big &&
-                a2.armour_type == Robot::ArmourType::Small) {
-                return true;
-            } else if (
-                a1.armour_type == Robot::ArmourType::Small &&
-                a2.armour_type == Robot::ArmourType::Big) {
+        armours.begin(), armours.end(), [color](const ArmorObject & a1, const ArmorObject & a2) {
+            // 不是识别的颜色
+            if(a1.cls != (int)color)
+            {
                 return false;
             }
 
-            auto w1      = a1.right_light.top - a1.left_light.top;
-            auto h1      = a1.left_light.bottom - a1.left_light.top;
-            double area1 = std::fabs(w1.x * h1.y - w1.y * h1.x);
+            if(a2.cls != (int)color)
+            {
+                return true;
+            }
 
-            auto w2      = a2.right_light.top - a2.left_light.top;
-            auto h2      = a2.left_light.bottom - a2.left_light.top;
-            double area2 = std::fabs(w2.x * h2.y - w2.y * h2.x);
+            std::vector<cv::Point2f> tmp1(a1.apex, a1.apex + APEX_NUM);
+            double area1 = cv::boundingRect(tmp1).area();
+
+            std::vector<cv::Point2f> tmp2(a2.apex, a2.apex + APEX_NUM);
+            double area2 = cv::boundingRect(tmp2).area();
+
 
             return area1 > area2;
         });
 
     auto select_armour = armours.front();
-    auto pts           = select_armour.get_points();  //装甲板的四点，用来测距
+    if(select_armour.cls != (int)color )
+    {
+        return false;
+    }
 
     // 根据 传来的pitch角度构造 旋转矩阵
     double pitch_radian = receive_data.pitch / 180. * M_PI;
@@ -105,11 +138,16 @@ bool Modules::PredictorEKF::predict(
     Eigen::Matrix3d R_G2W = PredictorEKF::get_R_G2W(receive_data);
 
     // 得到3个坐标系下的坐标,
-    Eigen::Vector3d camera_points = get_camera_points(pts, select_armour.armour_type);
+    Eigen::Vector3d camera_points = get_camera_points(select_armour);
     Eigen::Vector3d gimbal_points = R_C2G * camera_points;
     Eigen::Vector3d world_points  = R_G2W * gimbal_points;
 
 
+    if(loss_frame > 10)
+    {
+        ekf.reset(world_points);    
+    }
+    loss_frame = 0;
     // 相机坐标系，
     // x轴向右，y轴向下，z轴延相机向前方
     fmt::print(
@@ -134,43 +172,56 @@ bool Modules::PredictorEKF::predict(
     std::string world_position_fmt = fmt::format("[world]: x={:.3f},y={:.3f},z={:.3f}", world_points(0, 0), world_points(1, 0),
         world_points(2, 0));
 
-    cv::putText(showimg,world_position_fmt, select_armour.left_light.bottom - cv::Point2f(0, -30), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 0, 255));
-    cv::putText(showimg,gimbal_positino_fmt, select_armour.left_light.bottom - cv::Point2f(0, -60), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 0, 255));
-    cv::putText(showimg,camera_position_fmt, select_armour.left_light.bottom - cv::Point2f(0, -90), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 255, 255));
+    cv::putText(showimg,world_position_fmt, select_armour.apex[1] - cv::Point2f(0, -30), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 0, 255));
+    cv::putText(showimg,gimbal_positino_fmt, select_armour.apex[1] - cv::Point2f(0, -60), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 0, 255));
+    cv::putText(showimg,camera_position_fmt, select_armour.apex[1] - cv::Point2f(0, -90), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 255, 255));
     // ----------------- 卡尔曼滤波的使用 ------------------------
 
-    // // 更新时间
-    // predictfunc.delta_t = timestamp - last_time;
-    // last_time           = timestamp;
-    // // fmt::print("delay_time = {}s\n", predictfunc.delta_t);
+    // 更新时间
+    predictfunc.delta_t = timestamp - last_time;
+    last_time           = timestamp;
+    // fmt::print("delay_time = {}s\n", predictfunc.delta_t);
 
-    // // ekf滤波出来，三维坐标和速度
+    // ekf滤波出来，三维坐标和速度
 
-    // ekf.predict(predictfunc);
-    // // x,y,z ,v_x, v_y, v_z
-    // VectorX smooth_status = ekf.update(measure, world_points);
+    ekf.predict(predictfunc);
+    // x,y,z ,v_x, v_y, v_z
+    VectorX smooth_status = ekf.update(measure, world_points);
+    
+    Eigen::Vector3d predict_world_points = smooth_status.topRows<3>();
+    predict_world_points(0, 0) += smooth_status(3, 0) * pre_time;
+    predict_world_points(1, 0) += smooth_status(4, 0) * pre_time;
+    predict_world_points(2, 0) += smooth_status(5, 0) * pre_time;
     // ----------------------------------------------------------
+    
+    std::string world__EKF_position_fmt = fmt::format("[world_EKF]: x={:.3f},y={:.3f},z={:.3f}", smooth_status(0, 0), smooth_status(1, 0),
+        smooth_status(2, 0));
+    std::string world__predict_position_fmt = fmt::format("[world_predict]: x={:.3f},y={:.3f},z={:.3f}", predict_world_points(0, 0), predict_world_points(1, 0),
+        predict_world_points(2, 0));
+    cv::putText(showimg,world__EKF_position_fmt, select_armour.apex[1] - cv::Point2f(0, -120), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 255, 255));
+    cv::putText(showimg,world__predict_position_fmt, select_armour.apex[1] - cv::Point2f(0, -150), 1, cv::FONT_HERSHEY_PLAIN, cv::Scalar(0, 255, 255));
+    float yaw_predict_slove = std::atan2(predict_world_points(1,0),predict_world_points(0, 0));
+            // -std::atan2(gimbal_points(1, 0), gimbal_points(0, 0));  // 向右为正
+    //float yaw_world = std::atan2(smooth_status(1,0),smooth_status(0, 0));
+    float pitch_predict_slove = std::atan2(predict_world_points(2,0),predict_world_points(0, 0));
+    //float pitch_solve = std::atan2(gimbal_points(2, 0), gimbal_points(0, 0));
 
-    double send_yaw = std::atan2(world_points(1,0), world_points(0, 0));
-            // -std::atan2(gimbal_points(1, 0), gimbal_points(0, 0)) / M_PI * 180.;  // 向右为正
-
-    float pitch_solve = std::atan2(gimbal_points(2, 0), gimbal_points(0, 0));
     // 解算弹道模型
-    if (solve_ballistic_model(world_points, receive_data, pitch_solve)) {
+    if (solve_ballistic_model(world_points, receive_data, pitch_predict_slove)) {
         fmt::print(
-            "最终迭代picth_k={:.3f}度, shoot={}\n", pitch_solve / M_PI * 180.,
+            "最终迭代picth_k={:.3f}度, shoot={}\n", pitch_predict_slove / M_PI * 180.,
             receive_data.shoot_speed);  // 弧度 转 度
 
-        fmt::print("[send]: yaw={:.3f}, pitch={:.3f}\n", send_yaw / M_PI * 180., pitch_solve / M_PI * 180.);
+        fmt::print("[send]: yaw={:.3f}, pitch={:.3f}\n", yaw_predict_slove / M_PI * 180., pitch_predict_slove / M_PI * 180.);
 
-        send_data.send_pitch = pitch_solve / M_PI * 180. + static_pitch;
-        send_data.send_yaw   = send_yaw / M_PI * 180. + static_yaw;
+        send_data.send_pitch = pitch_predict_slove / M_PI * 180. + static_pitch;
+        send_data.send_yaw   = yaw_predict_slove/ M_PI * 180. + static_yaw;
         send_data.goal       = 1;
 
     } else {
         fmt::print(
             fg(fmt::color::red) | fmt::emphasis::bold, "最终迭代picth_k={:.3f}度, shoot={}\n",
-            pitch_solve / M_PI * 180., receive_data.shoot_speed);
+            pitch_predict_slove / M_PI * 180., receive_data.shoot_speed);
 
         send_data.goal       = 0;
 
@@ -180,15 +231,17 @@ bool Modules::PredictorEKF::predict(
     return true;
 }
 
-Eigen::Vector3d Modules::PredictorEKF::get_camera_points(
-    std::vector<cv::Point2f> & armour_points, Robot::ArmourType type)
+Eigen::Vector3d Modules::PredictorEKF::get_camera_points(const ArmorObject& armor)
 {
     cv::Mat tvec, rvec;
-    if (type == Robot::ArmourType::Big) {
-        cv::solvePnP(big_obj, armour_points, F_MAT, C_MAT, rvec, tvec);
+    std::vector<cv::Point2f> armor_points(armor.apex, armor.apex + APEX_NUM);
+
+
+    if ( BIG_ARMOR_CLASSES.find(armor.cls) != BIG_ARMOR_CLASSES.end() ) {
+        cv::solvePnP(big_obj, armor_points, F_MAT, C_MAT, rvec, tvec);
         fmt::print("big armour\n");
     } else {
-        cv::solvePnP(small_obj, armour_points, F_MAT, C_MAT, rvec, tvec);
+        cv::solvePnP(small_obj, armor_points, F_MAT, C_MAT, rvec, tvec);
         fmt::print("small armour\n");
     }
 
