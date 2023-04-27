@@ -12,16 +12,6 @@ find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 
-find_package(CUDA REQUIRED)
-
-## tensorrt 和 cuda 要修改
-# tensorrt
-include_directories("/home/yiyu/NVIDIA/TensorRT-8.4.3.1.Linux.x86_64-gnu.cuda-11.6.cudnn8.4/TensorRT-8.4.3.1/include")
-link_directories("/home/yiyu/NVIDIA/TensorRT-8.4.3.1.Linux.x86_64-gnu.cuda-11.6.cudnn8.4/TensorRT-8.4.3.1/lib")
-
-# cuda
-include_directories(/usr/local/cuda/include)
-link_directories(/usr/local/cuda/lib64)
 
 
 message("init----------------------------")
@@ -69,6 +59,5 @@ devices
 ${OpenCV_LIBS}
 fmt::fmt
 
-# utility 
 )
 

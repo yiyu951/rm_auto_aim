@@ -2,9 +2,6 @@
 
 #include <fstream>
 
-using namespace nvinfer1;
-
-static Logger gLogger;
 
 std::vector<GridAndStride> grid_strides;
 
@@ -307,66 +304,49 @@ namespace Modules {
 
  Detector::Detector(const std::string &model_path) {
 
-  cudaSetDevice(DEVICE);
-  std::ifstream file(model_path, std::ios::binary);
-  if (!file.good()) {
-    std::cerr << "engine file error! :[" << model_path << "]" << std::endl;
-    exit(-1);
+  network = ie.ReadNetwork(model_path);
+
+  // Step 1. Read a model in OpenVINO Intermediate Representation
+  // (.xml and .bin files) or ONNX (.onnx file) format
+  if (network.getOutputsInfo().size() != 1)
+    throw std::logic_error("Sample supports topologies with 1 output only");
+
+  // Step 2. Configure input & output
+  //  Prepare input blobs
+  InferenceEngine::InputInfo::Ptr input_info =
+      network.getInputsInfo().begin()->second;
+  input_name = network.getInputsInfo().begin()->first;
+
+  std::cout << "input name = " << input_name << std::endl;
+
+  //  Prepare output blobs
+  if (network.getOutputsInfo().empty()) {
+    std::cerr << "Network outputs info is empty" << std::endl;
+    return ;
   }
+  InferenceEngine::DataPtr output_info =
+      network.getOutputsInfo().begin()->second;
+  output_name = network.getOutputsInfo().begin()->first;
+  std::cout << "output name = " << output_name << std::endl;
 
-  char *trtModelStream = nullptr;
-  size_t size = 0;
-  file.seekg(0, file.end);
-  size = file.tellg();
-  file.seekg(0, file.beg);
-  trtModelStream = new char[size];
-  assert(trtModelStream);
-  file.read(trtModelStream, size);
-  file.close();
+  // output_info->setPrecision(Precision::FP16);
+  // Step 3. Loading a model to the device
+  // executable_network = ie.LoadNetwork(network, "MULTI:GPU");
+  // executable_network = ie.LoadNetwork(network, "GPU");
+  executable_network = ie.LoadNetwork(network, "CPU");
 
-  runtime = nvinfer1::createInferRuntime(gLogger);
-  assert(runtime != nullptr);
-
-  engine = runtime->deserializeCudaEngine(trtModelStream, size);
-  assert(engine != nullptr);
-
-  //    delete[] trtModelStream;
-  context = engine->createExecutionContext();
-  assert(context != nullptr);
-
-  assert(engine->getNbBindings() == 2);
-
-  // In order to bind the buffers, we need to know the names of the input and
-  // output tensors. Note that indices are guaranteed to be less than
-  // IEngine::getNbBindings()
-  inputIndex = engine->getBindingIndex(INPUT_BLOB_NAME);
-  outputIndex = engine->getBindingIndex(OUTPUT_BLOB_NAME);
-  assert(inputIndex == 0);
-  assert(outputIndex == 1);
-
-  auto out_dims = engine->getBindingDimensions(1);
-  output_size = 1;
-  for (int j = 0; j < out_dims.nbDims; j++) {
-    output_size *= out_dims.d[j];
+  // Step 4. Create an infer request
+  infer_request = executable_network.CreateInferRequest();
+  const InferenceEngine::Blob::Ptr output_blob =
+      infer_request.GetBlob(output_name);
+  moutput = InferenceEngine::as<InferenceEngine::MemoryBlob>(output_blob);
+  // Blob::Ptr input = infer_request.GetBlob(input_name);     // just wrap Mat
+  // data by Blob::Ptr
+  if (!moutput) {
+    throw std::logic_error(
+        "We expect output to be inherited from MemoryBlob, "
+        "but by fact we were not able to cast output to MemoryBlob");
   }
-
-  prob = new float[ output_size];
-
-  // Create GPU buffers on device
-  CUDA_CHECK(cudaMalloc((void **)&buffers[inputIndex],
-                         3 * INPUT_H * INPUT_W * sizeof(float)));
-  CUDA_CHECK(cudaMalloc((void **)&buffers[outputIndex],
-                        output_size * sizeof(float)));
-
-  CUDA_CHECK(cudaStreamCreate(&stream));
-
-  // prepare input data cache in pinned memory
-//  CUDA_CHECK(
-//      cudaMallocHost((void **)&img_host, MAX_IMAGE_INPUT_SIZE_THRESH * 3));
-//  // prepare input data cache in device memory
-//  CUDA_CHECK(cudaMalloc((void **)&img_device, MAX_IMAGE_INPUT_SIZE_THRESH * 3));
-
-  delete[] trtModelStream;
 }
 
 
@@ -385,35 +365,31 @@ bool Detector::detect(Detection_pack & detection_pack) {
   // 分离颜色通道, 便于拷贝内存
   cv::split(pre, pre_split);
 
+InferenceEngine::Blob::Ptr imgBlob = infer_request.GetBlob(input_name);
 
+  InferenceEngine::MemoryBlob::Ptr mblob =
+      InferenceEngine::as<InferenceEngine::MemoryBlob>(imgBlob);
 
-  // 把图像数据拷贝至GPU
- CUDA_CHECK(cudaMemcpyAsync(
-     buffers[0] + 0 * INPUT_W * INPUT_H, pre_split[0].data,
-     INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
- CUDA_CHECK(cudaMemcpyAsync(
-     buffers[0] + 1 * INPUT_W * INPUT_H, pre_split[1].data,
-     INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
- CUDA_CHECK(cudaMemcpyAsync(
-     buffers[0] + 2 * INPUT_W * INPUT_H, pre_split[2].data,
-     INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice, stream));
+  auto mblobHolder = mblob->wmap();
+  float *blob_data = mblobHolder.as<float *>();
 
-//    cudaMemcpy(buffers[0] , input,
-//               3 * INPUT_W * INPUT_H * sizeof(float), cudaMemcpyHostToDevice);
-// 推理
-  // context->enqueue(1, (void **)buffers, stream, nullptr);
- context->enqueueV2((void **)buffers, stream, nullptr);
-  // 将推理结果拷贝出来
-  CUDA_CHECK(cudaMemcpyAsync(prob, buffers[1], output_size * sizeof(float),
-                             cudaMemcpyDeviceToHost, stream));
+  auto img_offset = INPUT_W * INPUT_H;
+  // Copy img to blob
+  for (int c = 0; c < 3; c++) {
+    memcpy(blob_data + c * img_offset, pre_split[c].data, INPUT_W * INPUT_H * sizeof(float));
+  }
 
-  // 同步
-  cudaStreamSynchronize(stream);
+ infer_request.Infer();
+
+  auto moutputHolder = moutput->rmap();
+  const float *net_pred =
+      moutputHolder.as<const InferenceEngine::PrecisionTrait<
+          InferenceEngine::Precision::FP32>::value_type *>();
 
   float scale =
       std::min(INPUT_W / (detection_pack.img.cols * 1.0), INPUT_H / (detection_pack.img.rows * 1.0));
 
-  decodeOutputs(prob, detection_pack.armors, scale, INPUT_W, INPUT_H);
+  decodeOutputs(net_pred, detection_pack.armors, scale, INPUT_W, INPUT_H);
 
 
     if (!detection_pack.armors.empty())
@@ -425,30 +401,7 @@ bool Detector::detect(Detection_pack & detection_pack) {
 
 Detector::~Detector() {
 
-  // Release stream and buffers
-  cudaStreamDestroy(stream);
-//  CUDA_CHECK(cudaFree(img_device));
-//  CUDA_CHECK(cudaFreeHost(img_host));
 
-  CUDA_CHECK(cudaFree(buffers[inputIndex]));
-  CUDA_CHECK(cudaFree(buffers[outputIndex]));
-  // Destroy the engine
-  // context->destroy();
-  // engine->destroy();
-  // runtime->destroy();
-
-  if (prob) {
-    delete[] prob;
-  }
-
-  if (context)
-    delete context;
-
-  if (engine)
-    delete engine;
-
-  if (runtime)
-    delete runtime;
 }
 
 }

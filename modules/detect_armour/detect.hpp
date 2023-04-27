@@ -1,8 +1,6 @@
 #ifndef _MODULE_DETECT_HPP_
 #define _MODULE_DETECT_HPP_
 
-#include "detect_armour/logging.h"
-
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -14,8 +12,8 @@
 
 #include <set>
 #include <unordered_set>
-#include "NvInfer.h"
-#include "cuda_utils.h"
+
+#include <inference_engine.hpp>
 
 struct GridAndStride
 {
@@ -42,7 +40,7 @@ static constexpr int NUM_COLORS  = 3;    // 颜色
 static constexpr int TOPK        = 20;   // TOP K
 
 static constexpr float NMS_THRESH       = 0.1;  // NMS 阈值
-static constexpr float BBOX_CONF_THRESH = 0.4;  // bbox 阈值
+static constexpr float BBOX_CONF_THRESH = 0.6;  // bbox 阈值
 static constexpr float MERGE_CONF_ERROR = 0.15;
 static constexpr float MERGE_MIN_IOU    = 0.2;
 
@@ -93,14 +91,14 @@ public:
 
     bool detect(Detection_pack & detection_pack);
 
-    int output_size = 1;
-    float * prob;
+  InferenceEngine::Core ie;                               // 网络
+  InferenceEngine::CNNNetwork network;                    // 可执行网络
+  InferenceEngine::ExecutableNetwork executable_network; // 推理请求
+  InferenceEngine::InferRequest infer_request;
+  InferenceEngine::MemoryBlob::CPtr moutput;
 
-    float * buffers[2];
-    nvinfer1::IRuntime * runtime;
-    nvinfer1::ICudaEngine * engine;
-    nvinfer1::IExecutionContext * context;
-    cudaStream_t stream;
+  std::string input_name;
+  std::string output_name;
     int inputIndex, outputIndex;
     std::string engineName;
 
