@@ -35,10 +35,8 @@ int main(int argc, char ** argv)
     fmt::print("Init Modules\n");
     // 模块初始化
     utils::timer timer{"main", 10};
-
     Modules::Detector detector{PROJECT_DIR "/Configs/detect/armor-nano-poly-fp32-best.onnx"};
     Modules::PredictorEKF predictor{};
-
     //  Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
 
     int frame = 1;  //主线程的帧数
@@ -67,7 +65,7 @@ int main(int argc, char ** argv)
 
     for (; main_loop_condition; frame++) {
         //计时
-        timer.start(1);
+        // timer.start(1);
         {  //上锁
             if (img.empty()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));

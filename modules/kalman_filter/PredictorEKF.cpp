@@ -315,8 +315,6 @@ bool Modules::PredictorEKF::solve_ballistic_model(
         } else {
             vertical_tmp += error;
             pitch_solve = atan(vertical_tmp / dist_horizonal);  // 弧度
-
-            // 避免pitch太大
         }
     }
 

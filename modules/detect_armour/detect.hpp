@@ -28,8 +28,6 @@ struct GridAndStride
 
 static constexpr int DEVICE                      = 0;  // GPU id
 static constexpr int BATCH_SIZE                  = 1;
-static constexpr int MAX_IMAGE_INPUT_SIZE_THRESH = 600 * 600;
-static constexpr int MAX_OUTPUT_BBOX_COUNT       = 20;
 
 static constexpr int APEX_NUM = 4;
 
@@ -60,10 +58,9 @@ struct ArmorObject
 
 const std::unordered_map<int, std::string> BIG_ARMOR_CLASSES{{1, "1"}, {7, "Base"}};
 const std::unordered_map<int, std::string> SMALL_ARMOR_CLASSES{{0, "G"}, {2, "2"}, {3, "3"},
-                                                        {4, "4"}, {5, "5"}, {6, "O"}};
-
+                                                               {4, "4"}, {5, "5"}, {6, "O"}};
 const std::unordered_map<int, std::string> ARMOR_CLASSES{{1, "1"}, {7, "Base"}, {0, "G"}, {2, "2"},
-                                                  {3, "3"}, {4, "4"},    {5, "5"}, {6, "O"}};
+                                                         {3, "3"}, {4, "4"},    {5, "5"}, {6, "O"}};
 const std::unordered_map<int, std::string> ARMOR_COLORS{{0, "Blue"}, {1, "Red"}, {2, "None"}};
 
 namespace Modules
@@ -84,27 +81,21 @@ struct Detection_pack  //每帧的打包数据结构
 class Detector
 {
 public:
-    // static const int OUTPUT_SIZE      = TOPK * sizeof(Detection) /
-    // sizeof(float) + 1;
     Detector(const std::string & model_path);
     ~Detector();
 
     bool detect(Detection_pack & detection_pack);
 
-  InferenceEngine::Core ie;                               // 网络
-  InferenceEngine::CNNNetwork network;                    // 可执行网络
-  InferenceEngine::ExecutableNetwork executable_network; // 推理请求
-  InferenceEngine::InferRequest infer_request;
-  InferenceEngine::MemoryBlob::CPtr moutput;
+    InferenceEngine::Core ie;                               // 网络
+    InferenceEngine::CNNNetwork network;                    // 可执行网络
+    InferenceEngine::ExecutableNetwork executable_network;  // 推理请求
+    InferenceEngine::InferRequest infer_request;
+    InferenceEngine::MemoryBlob::CPtr moutput;
 
-  std::string input_name;
-  std::string output_name;
+    std::string input_name;
+    std::string output_name;
     int inputIndex, outputIndex;
     std::string engineName;
-
-    //protected:
-    //  std::string input_name;
-    //  std::string output_name;
 };
 }  // namespace Modules
 

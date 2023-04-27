@@ -168,6 +168,7 @@ bool Serial::readSerial()
         }
         if (read_buffer_[0] != frame_header) {
             // 帧头验证失败
+            tcflush(fd, TCIFLUSH);  //清除缓冲区
             return false;
         }
         if (read(fd, read_buffer_ + 1, 13) != 13) {
