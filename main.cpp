@@ -90,9 +90,9 @@ int main(int argc, char ** argv)
         Modules::Detection_pack detection_pack{copyImg, wasteTime};
         // timer.end(1, "init detection_pack");
 
-        // timer.start(0);
+        timer.start(0);
         detector.detect(detection_pack);
-        // // timer.end(0, "detect");
+        timer.end(0, "detect");
 
         Devices::SendData send_data{};
         predictor.predict(detection_pack, receive_data, send_data, showimg, color);
