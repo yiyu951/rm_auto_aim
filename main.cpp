@@ -38,8 +38,7 @@ int main(int argc, char ** argv)
 
     Modules::Detector detector{PROJECT_DIR "/Configs/detect/armor-nano-poly-fp32-130.engine"};
     Modules::PredictorEKF predictor{};
-
-    //  Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
+    Devices::Serial serial{"/dev/ttyACM0", serial_mutex};
 
     int frame = 1;  //主线程的帧数
 
@@ -51,10 +50,10 @@ int main(int argc, char ** argv)
     std::thread cameraThread{
         camera_thread, std::ref(main_loop_condition), std::ref(img), std::ref(camera_mutex),
         std::ref(timestamp_ms)};
-    //  std::thread readSerialThread{readSerial_thread, std::ref(serial)};
+    std::thread readSerialThread{readSerial_thread, std::ref(serial)};
 
     cameraThread.detach();
-    // readSerialThread.detach();
+    readSerialThread.detach();
     //计时
     struct timespec tv_start;        //开始的时间戳
     struct timespec tv_end;          //结束的时间戳
@@ -97,10 +96,10 @@ int main(int argc, char ** argv)
         Devices::SendData send_data{};
         predictor.predict(detection_pack, receive_data, send_data, showimg, color);
 
-        //  std::thread sendSerialThread{sendSerial_thread, std::ref(serial), std::ref(send_data)};
-        //  sendSerialThread.join();
-        // // draw
+        std::thread sendSerialThread{sendSerial_thread, std::ref(serial), std::ref(send_data)};
+        sendSerialThread.join();
 
+        // // draw
         Robot::drawArmours(detection_pack.armors, showimg, color);
         // Robot::drawFPS(showimg, 1000. / main_thread_time, "Main", cv::Point2f(5, 80));
         Robot::drawSerial(showimg, receive_data, cv::Point2f(1000, 20));
